@@ -1,0 +1,51 @@
+dyn(bytes(dyn({
+  "authorization": "<apikey>"
+}).as(this, (has(state.cursor) && has(state.cursor.job_group_id) && has(state.cursor.job_group_action_id) && has(state.cursor.index) ?
+  request("POST", state.url + "/pipeline/job/action/info")
+  .with({
+    "Header": {
+      "Authorization": [this.authorization],
+      "Content-Type": ["application/json"]
+    },
+    "Body": "{ \"job_group_action_id\": " +
+      string(state.cursor.job_group_action_id[state.cursor.index]) +
+      ", \"job_group_id\": " +
+      string(state.cursor.job_group_id[state.cursor.index]) +
+      " }"
+  })
+:
+  request("POST", state.url + "/pipeline/job/info")
+  .with({
+    "Header": {
+      "Authorization": [this.authorization],
+      "Content-Type": ["application/json"]
+    },
+    "Body": "{ \"id\": 16 }"
+  })
+)).do_request().Body).decode_json().with({
+  "want_more_flag": !has(state.cursor) || 
+    !has(state.cursor.index) ||
+    !has(state.cursor.job_group_id) ||
+    int(state.cursor.index) < state.cursor.job_group_id.size() - 1,
+  "is_not_first": has(state.cursor) && has(state.cursor.job_group_id) && has(state.cursor.job_group_action_id) && has(state.cursor.index)
+})).as(body, {
+  "events": [({
+    "secvision": bool(body.is_not_first) ? body : {},
+    "debug": state,
+    "from": bool(body.is_not_first) ? "/pipeline/job/info" : "/pipeline/job/action/info"
+  }).drop_empty()],
+  "cursor": bool(body.want_more_flag) ? {
+    "now": now,
+    "id": bool(body.is_not_first) ? state.cursor.id : uuid(),
+    "index": bool(body.is_not_first) ? int(state.cursor.index) + 1 : 0,
+    "job_group_id": bool(body.is_not_first) ? 
+        state.cursor.job_group_id 
+      : 
+        body.job_groups.map(g, g.job_group_actions.map(a, g.id)).flatten(),
+    "job_group_action_id": bool(body.is_not_first) ? 
+        state.cursor.job_group_action_id 
+      : 
+        body.job_groups.map(g, g.job_group_actions.map(a, a.id)).flatten()
+  } : {},
+  "want_more": bool(body.want_more_flag)
+})
